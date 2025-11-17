@@ -32,6 +32,7 @@ __pycache__/
 *.parquet
 *.csv
 !nasdaq_yfinance_20200401/stocks_sample/*.csv
+!nasdaq_yfinance_20200401/stocks_processed/*.csv
 
 # IDE
 .vscode/
