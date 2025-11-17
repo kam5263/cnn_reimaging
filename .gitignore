@@ -1,0 +1,54 @@
+# Zip files
+*.zip
+
+# Environment files
+.env
+.env.*
+venv/
+env/
+ENV/
+
+# Data directories (excluding stocks_sample)
+nasdaq_yfinance_20200401/stocks/
+nasdaq_yfinance_20200401/etfs/
+nasdaq_yfinance_20200401/symbols_valid_meta.csv
+nyse_nasdaq_nyse_20171011/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Model files (large files)
+*.keras
+*.h5
+*.pkl
+*.pickle
+
+# Data files
+*.npz
+*.parquet
+*.csv
+!nasdaq_yfinance_20200401/stocks_sample/*.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Images (optional - uncomment if you don't want to track images)
+# *.png
+# *.jpg
+# *.jpeg
+
