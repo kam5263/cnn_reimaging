@@ -168,9 +168,14 @@ def generate_image_from_window(window_df, n_days, total_height, image_width):
             image[total_height - vol_h : total_height, x_center] = 255
 
     # 6. 이평선 그리기 (점으로 하나씩)
+    # for t in range(n_days):
+    #     if not np.isnan(y_ma_arr[t]):
+    #         image[y_ma_arr[t], x_center_arr[t]] = 128  # 회색 점
+    
+    # 이평선 그리기 (흰색으로)
     for t in range(n_days):
         if not np.isnan(y_ma_arr[t]):
-            image[y_ma_arr[t], x_center_arr[t]] = 128  # 회색 점
+            image[y_ma_arr[t], x_center_arr[t]] = 255  # 흰색 점
 
     return image
 
@@ -193,10 +198,13 @@ def calculate_label_and_return(label_window_df):
 
 def process_single_file(filepath, n_days, img_config, min_length):
     """
-    단일 CSV 파일을 처리하여 (이미지, 라벨, 날짜, 수익률) 리스트를 반환합니다.
+    단일 CSV 파일을 처리하여 (이미지, 라벨, 날짜, 수익률, 티커) 리스트를 반환합니다.
     멀티프로세싱을 위해 분리된 함수입니다.
     """
     results = []
+    
+    # 파일 경로에서 티커 추출 (예: 'nasdaq_yfinance_20200401/stocks/AAPL.csv' -> 'AAPL')
+    ticker = os.path.splitext(os.path.basename(filepath))[0]
     
     try:
         df = pd.read_csv(filepath)
@@ -227,8 +235,8 @@ def process_single_file(filepath, n_days, img_config, min_length):
             date = img_window.index[-1]
             
             if image is not None and label is not None and actual_return is not None:
-                # 실제 수익률(actual_return)도 결과에 추가
-                results.append((image, label, date, actual_return))
+                # 실제 수익률(actual_return)과 티커 정보도 결과에 추가
+                results.append((image, label, date, actual_return, ticker))
     
     except pd.errors.EmptyDataError:
         pass  # 빈 파일은 조용히 건너뜀
@@ -277,6 +285,7 @@ def process_all_files(stocks_folder, output_file, n_days, num_workers=None):
     all_labels = []
     all_dates = []
     all_actual_returns = []
+    all_tickers = []
     # 멀티프로세싱으로 파일 처리
     process_func = partial(process_single_file, n_days=n_days, 
                           img_config=img_config, min_length=min_length)
@@ -292,7 +301,7 @@ def process_all_files(stocks_folder, output_file, n_days, num_workers=None):
     # 결과 수집
     print("\n멀티프로세싱 완료. 결과 수집 중...")
     for results in results_list:
-        for image, label, date, actual_return in results:
+        for image, label, date, actual_return, ticker in results:
             all_images.append(image)
             all_labels.append(label)
             
@@ -301,6 +310,7 @@ def process_all_files(stocks_folder, output_file, n_days, num_workers=None):
             all_dates.append(date.strftime('%Y-%m-%d'))
             
             all_actual_returns.append(actual_return)
+            all_tickers.append(ticker)
 
     print("모든 파일 처리 완료. NumPy 배열로 변환 중...")
     
@@ -313,6 +323,9 @@ def process_all_files(stocks_folder, output_file, n_days, num_workers=None):
     dates_arr = np.array(all_dates)
     
     returns_arr = np.array(all_actual_returns, dtype=np.float32) # 32-bit 부동소수점
+    
+    # 티커 정보도 문자열 배열로 저장
+    tickers_arr = np.array(all_tickers)
 
     # 데이터 형태 출력
     print(f"총 {len(images_arr)}개의 (이미지, 라벨) 쌍이 생성되었습니다.")
@@ -321,6 +334,7 @@ def process_all_files(stocks_folder, output_file, n_days, num_workers=None):
         print(f"  라벨(y) 형태: {labels_arr.shape}, dtype: {labels_arr.dtype}")
         print(f"  날짜(meta) 형태: {dates_arr.shape}, dtype: {dates_arr.dtype}")
         print(f"  실제 수익률(actual_return) 형태: {returns_arr.shape}, dtype: {returns_arr.dtype}")
+        print(f"  티커(tickers) 형태: {tickers_arr.shape}, dtype: {tickers_arr.dtype}")
         
         # 흑백 이미지이므로 채널 차원 추가 (H, W) -> (H, W, 1)
         # (TensorFlow/Keras 훈련에 적합하도록)
@@ -334,7 +348,8 @@ def process_all_files(stocks_folder, output_file, n_days, num_workers=None):
             images=images_arr,
             labels=labels_arr,
             dates=dates_arr,
-            returns=returns_arr
+            returns=returns_arr,
+            tickers=tickers_arr
         )
         print("저장 완료.")
     else:
@@ -355,80 +370,80 @@ if __name__ == "__main__":
     # 5일 이미지/라벨
     print("\n--- 4. 메인 파이프라인 실행 (5일 예제) ---")
     process_all_files(
-        stocks_folder='nasdaq_yfinance_20200401/stocks_sample', # 5000개 이상의 csv 파일 존재
-        output_file='data_L5_R5_appl.npz', # 새 이름으로 저장
+        stocks_folder='nasdaq_yfinance_20200401/stocks', # 5000개 이상의 csv 파일 존재
+        output_file='data_L5_R5.npz', # 새 이름으로 저장
         n_days=5
     )
+    # 샘플 이미지 저장
+    # import matplotlib.pyplot as plt
 
-    import matplotlib.pyplot as plt
+    # # 1. 불러올 NPZ 파일 이름 (수정된 파일)
+    # # (이 파일이 create_dataset_fixed.py와 동일한 경로에 있다고 가정)
+    # NPZ_FILE = 'data_L5_R5_appl.npz' 
 
-    # 1. 불러올 NPZ 파일 이름 (수정된 파일)
-    # (이 파일이 create_dataset_fixed.py와 동일한 경로에 있다고 가정)
-    NPZ_FILE = 'data_L5_R5_appl.npz' 
+    # # 2. 확인할 랜덤 샘플 개수
+    # NUM_SAMPLES = 5
 
-    # 2. 확인할 랜덤 샘플 개수
-    NUM_SAMPLES = 5
+    # data = None # data 객체를 try/finally에서 모두 접근할 수 있도록 초기화
 
-    data = None # data 객체를 try/finally에서 모두 접근할 수 있도록 초기화
-
-    try:
-        print(f"'{NPZ_FILE}' 파일 로드 중 (mmap_mode='r')...")
-        # mmap_mode='r' : 파일을 메모리에 올리지 않고, 디스크에 연결만 합니다.
-        data = np.load(NPZ_FILE, allow_pickle=True, mmap_mode='r')
+    # try:
+    #     print(f"'{NPZ_FILE}' 파일 로드 중 (mmap_mode='r')...")
+    #     # mmap_mode='r' : 파일을 메모리에 올리지 않고, 디스크에 연결만 합니다.
+    #     data = np.load(NPZ_FILE, allow_pickle=True, mmap_mode='r')
         
-        # 3. 데이터 배열 '포인터' 가져오기 (이 시점엔 메모리 차지 안 함)
-        images = data['images']
-        labels = data['labels']
-        dates = data['dates']
-        returns = data['returns']
+    #     # 3. 데이터 배열 '포인터' 가져오기 (이 시점엔 메모리 차지 안 함)
+    #     images = data['images']
+    #     labels = data['labels']
+    #     dates = data['dates']
+    #     returns = data['returns']
         
-        total_count = len(images)
+    #     total_count = len(images)
         
-        if total_count == 0:
-            print("오류: 파일에 데이터가 없습니다.")
-        else:
-            print(f"파일 로드 성공. 총 {total_count}개의 샘플 발견.")
+    #     if total_count == 0:
+    #         print("오류: 파일에 데이터가 없습니다.")
+    #     else:
+    #         print(f"파일 로드 성공. 총 {total_count}개의 샘플 발견.")
 
-            # 4. 전체 샘플 중 NUM_SAMPLES 개수만큼 랜덤 인덱스 추출
-            # replace=False : 중복 없이 뽑기
-            random_indices = np.random.choice(total_count, NUM_SAMPLES, replace=False)
-            random_indices.sort() # 보기 좋게 정렬
+    #         # 4. 전체 샘플 중 NUM_SAMPLES 개수만큼 랜덤 인덱스 추출
+    #         # replace=False : 중복 없이 뽑기
+    #         random_indices = np.random.choice(total_count, NUM_SAMPLES, replace=False)
+    #         random_indices.sort() # 보기 좋게 정렬
             
-            print(f"\n--- {NUM_SAMPLES}개의 랜덤 샘플 정보 (인덱스: {random_indices}) ---")
+    #         print(f"\n--- {NUM_SAMPLES}개의 랜덤 샘플 정보 (인덱스: {random_indices}) ---")
 
-            # 5. 랜덤 인덱스를 하나씩 돌면서 "실제로" 데이터 읽기
-            for i, index in enumerate(random_indices):
-                print(f"\n--- {i+1}번째 샘플 (전체 인덱스: {index}) ---")
+    #         # 5. 랜덤 인덱스를 하나씩 돌면서 "실제로" 데이터 읽기
+    #         for i, index in enumerate(random_indices):
+    #             print(f"\n--- {i+1}번째 샘플 (전체 인덱스: {index}) ---")
                 
-                # 🚨 이 시점에 디스크에서 딱 해당 인덱스의 데이터만 읽어옵니다.
-                sample_image = images[index]
-                sample_label = labels[index]
-                sample_date = dates[index]
-                sample_return = returns[index]
+    #             # 🚨 이 시점에 디스크에서 딱 해당 인덱스의 데이터만 읽어옵니다.
+    #             sample_image = images[index]
+    #             sample_label = labels[index]
+    #             sample_date = dates[index]
+    #             sample_return = returns[index]
                 
-                print(f"  - 날짜 (Date): {sample_date}")
-                print(f"  - 라벨 (Label): {sample_label} (0=Down, 1=Up)")
-                print(f"  - 실제 수익률 (Return): {sample_return:.4f}")
-                print(f"  - 이미지 형태: {sample_image.shape}")
+    #             print(f"  - 날짜 (Date): {sample_date}")
+    #             print(f"  - 라벨 (Label): {sample_label} (0=Down, 1=Up)")
+    #             print(f"  - 실제 수익률 (Return): {sample_return:.4f}")
+    #             print(f"  - 이미지 형태: {sample_image.shape}")
                 
-                # 6. 이미지 시각화
-                plt.figure(figsize=(6, 4))
-                # (32, 15, 1) 형태를 (32, 15)로 변경하여 흑백 이미지로 표시
-                plt.imshow(np.squeeze(sample_image), cmap='gray', aspect='auto')
-                plt.title(f"Sample Index: {index} | Date: {sample_date} | Label: {sample_label}")
-                plt.xlabel("Features (Time steps)")
-                plt.ylabel("Channels (LOB data)")
-                plt.show()
+    #             # 6. 이미지 시각화
+    #             plt.figure(figsize=(6, 4))
+    #             # (32, 15, 1) 형태를 (32, 15)로 변경하여 흑백 이미지로 표시
+    #             plt.imshow(np.squeeze(sample_image), cmap='gray', aspect='auto')
+    #             plt.title(f"Sample Index: {index} | Date: {sample_date} | Label: {sample_label}")
+    #             plt.xlabel("Features (Time steps)")
+    #             plt.ylabel("Channels (LOB data)")
+    #             plt.savefig(f"sample_{index}.png")
 
-    except FileNotFoundError:
-        print(f"오류: '{NPZ_FILE}' 파일을 찾을 수 없습니다.")
-    except KeyError:
-        print("오류: .npz 파일에 'images', 'labels', 'dates', 'returns' 키 중 하나가 없습니다.")
-    except Exception as e:
-        print(f"파일 로드 중 알 수 없는 오류 발생: {e}")
+    # except FileNotFoundError:
+    #     print(f"오류: '{NPZ_FILE}' 파일을 찾을 수 없습니다.")
+    # except KeyError:
+    #     print("오류: .npz 파일에 'images', 'labels', 'dates', 'returns' 키 중 하나가 없습니다.")
+    # except Exception as e:
+    #     print(f"파일 로드 중 알 수 없는 오류 발생: {e}")
 
-    finally:
-        # 7. (매우 중요) mmap_mode로 열었으면 반드시 닫아주어야 합니다.
-        if data is not None and hasattr(data, 'close'):
-            data.close()
-            print("\n파일 핸들(mmap)을 닫았습니다.")
+    # finally:
+    #     # 7. (매우 중요) mmap_mode로 열었으면 반드시 닫아주어야 합니다.
+    #     if data is not None and hasattr(data, 'close'):
+    #         data.close()
+    #         print("\n파일 핸들(mmap)을 닫았습니다.")
