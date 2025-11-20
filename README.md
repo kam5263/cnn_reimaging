@@ -1,380 +1,285 @@
-# CNN 주식 예측 시스템 실행 가이드
+# CNN Stock Prediction Pipeline
 
-이 문서는 CNN 기반 주식 예측 시스템의 전체 워크플로우와 각 스크립트의 역할을 설명합니다.
+주식 차트 이미지를 CNN으로 분석하여 상승/하락을 예측하는 파이프라인입니다.
 
 ## 📋 목차
 
-1. [전체 워크플로우 개요](#전체-워크플로우-개요)
-2. [CNN 파이프라인](#cnn-파이프라인)
-3. [WSTR 벤치마크 및 비교](#wstr-벤치마크-및-비교)
-4. [실행 순서 요약](#실행-순서-요약)
+- [개요](#개요)
+- [프로젝트 구조](#프로젝트-구조)
+- [실행 순서](#실행-순서)
+- [스크립트 상세 설명](#스크립트-상세-설명)
+- [데이터 형식](#데이터-형식)
+- [요구사항](#요구사항)
 
----
+## 개요
 
-## 전체 워크플로우 개요
+이 프로젝트는 논문 기반의 CNN 모델을 사용하여 주식 차트 이미지로부터 향후 5일간의 상승/하락을 예측합니다. 
 
-이 시스템은 두 가지 주요 파이프라인으로 구성됩니다:
+주요 특징:
+- 주식 데이터를 차트 이미지로 변환 (OHLCV 데이터 시각화)
+- CNN 모델을 통한 이미지 분류 (Up/Down 예측)
+- NASDAQ 주식 필터링 및 Stale stocks 제외
+- Long/Short 전략 데이터 생성
 
-1. **CNN 파이프라인**: 주식 차트 이미지를 CNN으로 학습하여 주가 상승/하락을 예측
-2. **WSTR 벤치마크 파이프라인**: 과거 수익률 기반 벤치마크 전략과 CNN 전략을 비교
+## 프로젝트 구조
 
 ```
-CNN 파이프라인:
-make_npz.py → train.py → run_predictions.py
-
-WSTR 벤치마크 파이프라인:
-make_wstr_npz.py → cnn_wstr_compare.py
+.
+├── make_image.py              # 주식 데이터를 이미지로 변환
+├── train.py                   # CNN 모델 훈련
+├── filter_nasdaq_stocks.py    # NASDAQ 주식 필터링
+├── find_stale_stocks.py       # Stale stocks 탐지
+├── save_predictions.py        # 예측 확률 저장
+├── create_longshort_csv.py    # Long/Short 전략 CSV 생성
+├── nasdaq_yfinance_20200401/
+│   ├── stocks/                # 개별 주식 CSV 파일들
+│   ├── symbols_valid_meta.csv # 원본 심볼 메타데이터
+│   ├── nasdaq_stocks_filtered.csv
+│   └── nasdaq_stocks_symbols.txt
+├── data_L5_R5.npz             # 생성된 이미지 데이터셋
+├── cnn_L5_R5_model_final.keras # 훈련된 모델
+└── stocks_combined.csv        # 예측 확률이 포함된 주식 데이터
 ```
 
----
+## 실행 순서
 
-## CNN 파이프라인
-
-### 1. `make_npz.py` - 데이터 전처리 및 이미지 생성
-
-**목적**: 주식 CSV 파일들을 읽어서 CNN 학습용 차트 이미지와 라벨을 생성하여 NPZ 파일로 저장
-
-#### 주요 기능
-
-1. **데이터 전처리** (`preprocess_data`)
-   - CSV 파일에서 날짜, OHLCV 데이터 로드
-   - 1993-01-01 이후 데이터만 사용
-   - 조정 수익률(AdjReturn) 계산
-   - O/H/L 가격을 종가 대비 비율로 변환
-
-2. **차트 이미지 생성** (`generate_image_from_window`)
-   - 롤링 윈도우 방식으로 n일치 데이터를 차트 이미지로 변환
-   - 논문 기반 스케일링 로직 적용
-   - 가격 영역(4/5)과 거래량 영역(1/5)으로 분리
-   - High-Low 바, Open/Close 점, 이동평균선 포함
-   - 이미지 크기:
-     - 5일: 32x15 픽셀
-     - 20일: 64x60 픽셀
-     - 60일: 96x180 픽셀
-
-3. **라벨 및 수익률 계산** (`calculate_label_and_return`)
-   - 미래 n일 누적 수익률 계산
-   - 수익률 > 0% → 라벨 1 (Up)
-   - 수익률 ≤ 0% → 라벨 0 (Down)
-   - 실제 수익률 값도 함께 저장
-
-4. **멀티프로세싱 처리** (`process_all_files`)
-   - 모든 CSV 파일을 병렬 처리
-   - 결과를 하나의 NPZ 파일로 통합
-
-#### 입력
-- `stocks_folder`: 주식 CSV 파일들이 있는 폴더 경로
-- `n_days`: 이미지 기간 (5, 20, 60 중 선택)
-
-#### 출력
-- `data_L5_R5_with_returns.npz`: 다음 데이터 포함
-  - `images`: 차트 이미지 배열 (N, H, W, 1)
-  - `labels`: 라벨 배열 (0 또는 1)
-  - `dates`: 날짜 배열
-  - `returns`: 실제 수익률 배열
-
-#### 실행 예시
-```python
-process_all_files(
-    stocks_folder='nasdaq_yfinance_20200401/stocks',
-    output_file='data_L5_R5_with_returns.npz',
-    n_days=5
-)
-```
-
----
-
-### 2. `train.py` - CNN 모델 훈련
-
-**목적**: 생성된 NPZ 파일을 사용하여 CNN 모델을 훈련하고 저장
-
-#### 주요 기능
-
-1. **데이터 로드** (`load_data`)
-   - NPZ 파일에서 이미지, 라벨, 날짜 로드
-   - 라벨을 원-핫 인코딩으로 변환 (2개 클래스: Down, Up)
-   - 데이터 타입 최적화 (uint8)
-
-2. **시계열 데이터 분할**
-   - 1993-2000: 훈련/검증 데이터
-   - 2001-: 테스트 데이터 (Out-of-Sample)
-   - 훈련/검증 데이터는 7:3으로 랜덤 분할
-
-3. **CNN 모델 구축** (`build_model`)
-   - 논문 Figure 3 기반 아키텍처
-   - **Block 1**: Conv2D(64, 5x3) → BatchNorm → LeakyReLU → MaxPool(2x1)
-   - **Block 2**: Conv2D(128, 5x3) → BatchNorm → LeakyReLU → MaxPool(2x1)
-   - **FC Head**: Flatten → Dropout(0.5) → Dense(2, softmax)
-   - 최종 출력: [P(Down), P(Up)] 확률
-
-4. **모델 훈련**
-   - Optimizer: Adam (learning_rate=1e-5)
-   - Loss: Categorical Crossentropy
-   - Batch Size: 128
-   - Early Stopping: val_loss 기준, patience=2
-   - Model Checkpoint: 최상의 모델 자동 저장
-
-#### 입력
-- `data_L5_R5_with_returns.npz`: `make_npz.py`에서 생성한 파일
-
-#### 출력
-- `cnn_L5_R5_model.keras`: 훈련된 모델 파일
-- 콘솔 출력: 훈련 과정 및 테스트 정확도
-
-#### 주요 설정
-```python
-NPZ_FILE = 'data_L5_R5_with_returns.npz'
-IMAGE_SHAPE = (32, 15, 1)  # 5-day 이미지
-NUM_CLASSES = 2
-MODEL_SAVE_PATH = 'cnn_L5_R5_model.keras'
-```
-
----
-
-### 3. `run_predictions.py` - 예측 수행 및 결과 저장
-
-**목적**: 훈련된 모델로 테스트 데이터에 대한 예측을 수행하고 백테스트용 데이터 생성
-
-#### 주요 기능
-
-1. **테스트 데이터 로드**
-   - NPZ 파일에서 이미지, 날짜, 실제 수익률 로드
-   - 2001년 이후 데이터만 필터링 (테스트 기간)
-
-2. **모델 로드**
-   - `cnn_L5_R5_model.keras` 파일 로드
-
-3. **예측 수행**
-   - 테스트셋 전체에 대해 'Up' 확률 예측
-   - Batch size: 1024 (대용량 데이터 처리 최적화)
-
-4. **백테스트용 데이터프레임 생성**
-   - 날짜, 예측 확률(signal_prob), 실제 수익률(actual_return) 포함
-   - Parquet 형식으로 저장 (압축 및 빠른 읽기)
-
-#### 입력
-- `data_L5_R5_with_returns.npz`: 원본 데이터
-- `cnn_L5_R5_model.keras`: 훈련된 모델
-
-#### 출력
-- `backtest_data_with_predictions.parquet`: 다음 컬럼 포함
-  - `date`: 날짜 (인덱스)
-  - `signal_prob`: CNN 예측 'Up' 확률 (0~1)
-  - `actual_return`: 실제 미래 수익률
-
-#### 실행 후
-이 파일 실행 후 `run_backtest.py`를 실행하여 롱숏 포트폴리오 백테스트를 수행할 수 있습니다.
-
----
-
-## WSTR 벤치마크 및 비교
-
-### 4. `make_wstr_npz.py` - WSTR 벤치마크 데이터 생성
-
-**목적**: 과거 수익률 기반 WSTR(Weighted Short-Term Return) 벤치마크 데이터 생성
-
-#### 주요 기능
-
-1. **데이터 전처리** (`preprocess_data`)
-   - CSV 파일에서 일간 수익률(AdjReturn)만 추출
-   - 1993-01-01 이후 데이터만 사용
-
-2. **WSTR 시그널 계산** (`process_single_file`)
-   - 과거 n일 누적 수익률 계산 (T-5 ~ T-1)
-   - 이 값이 WSTR 시그널 (단기 모멘텀 지표)
-
-3. **실제 수익률 계산**
-   - 미래 n일 누적 수익률 계산 (T+1 ~ T+5)
-   - 벤치마크 전략의 성과 평가에 사용
-
-4. **멀티프로세싱 처리**
-   - 모든 CSV 파일을 병렬 처리하여 NPZ 파일로 저장
-
-#### 입력
-- `stocks_folder`: 주식 CSV 파일들이 있는 폴더 경로
-- `n_days`: 수익률 계산 기간 (기본값: 5)
-
-#### 출력
-- `benchmark_data_WSTR.npz`: 다음 데이터 포함
-  - `dates`: 날짜 배열
-  - `signals`: WSTR 시그널 (과거 n일 누적 수익률)
-  - `returns`: 실제 미래 수익률
-
-#### WSTR 전략 설명
-- **시그널**: 과거 5일 누적 수익률 (단기 모멘텀)
-- **전략 타입**: 반전(Reversal) 전략
-  - 낮은 시그널(Decile 0) → 매수 (과거 하락 → 반등 기대)
-  - 높은 시그널(Decile 9) → 매도 (과거 상승 → 하락 기대)
-
----
-
-### 5. `cnn_wstr_compare.py` - CNN vs WSTR 성과 비교
-
-**목적**: CNN 전략과 WSTR 벤치마크 전략의 성과를 비교 분석
-
-#### 주요 기능
-
-1. **데이터 로드**
-   - CNN 예측 데이터: `backtest_data_with_predictions.parquet`
-   - WSTR 벤치마크 데이터: `benchmark_data_WSTR.npz`
-   - 둘 다 2001년 이후 테스트 기간만 사용
-
-2. **롱숏 포트폴리오 백테스트** (`run_backtest`)
-   - **CNN 전략** (모멘텀):
-     - 시그널 기준 십분위(Decile) 분할
-     - High(Decile 9) 매수, Low(Decile 0) 매도
-   - **WSTR 전략** (반전):
-     - 시그널 기준 십분위 분할
-     - Low(Decile 0) 매수, High(Decile 9) 매도
-   - 주간 리밸런싱 (월요일만)
-   - Winsorization: 극단값 제거 (1%, 99% quantile)
-
-3. **성과 분석** (`calculate_performance`)
-   - 주간 평균 수익률
-   - 주간 수익률 변동성
-   - 연간 샤프 비율 (Annualized Sharpe Ratio)
-   - 누적 수익률 계산
-
-4. **시각화**
-   - CNN과 WSTR의 누적 수익률 비교 그래프
-   - 로그 스케일로 표시
-   - 각 전략의 샤프 비율 포함
-
-#### 입력
-- `backtest_data_with_predictions.parquet`: CNN 예측 결과
-- `benchmark_data_WSTR.npz`: WSTR 벤치마크 데이터
-
-#### 출력
-- `cumulative_returns_COMPARISON.png`: 비교 그래프
-- 콘솔 출력: 각 전략의 성과 지표
-
-#### 전략 비교 요약
-
-| 전략 | 시그널 | 전략 타입 | 매수/매도 기준 |
-|------|--------|-----------|----------------|
-| CNN | CNN 예측 'Up' 확률 | 모멘텀 | High(9) 매수, Low(0) 매도 |
-| WSTR | 과거 5일 누적 수익률 | 반전 | Low(0) 매수, High(9) 매도 |
-
----
-
-## 실행 순서 요약
-
-### 1단계: CNN 파이프라인
+### 1단계: 데이터 필터링
 
 ```bash
-# 1. 데이터 전처리 및 이미지 생성
-python make_npz.py
-# 출력: data_L5_R5_with_returns.npz
+# NASDAQ 주식 필터링 (ETF 제외, 주요 거래소만)
+python filter_nasdaq_stocks.py
+```
 
-# 2. CNN 모델 훈련
+**출력 파일:**
+- `nasdaq_yfinance_20200401/nasdaq_stocks_filtered.csv`
+- `nasdaq_yfinance_20200401/nasdaq_stocks_symbols.txt`
+
+### 2단계: Stale Stocks 탐지
+
+```bash
+# Volume=0이고 가격이 변하지 않는 종목 찾기
+python find_stale_stocks.py
+```
+
+**출력 파일:**
+- `stale_stocks_summary.csv` - 종목별 요약 정보
+- `stale_stocks_detailed.csv` - 상세 기간 정보
+- `stale_stocks_30days_plus.csv` - 30일 이상 연속된 종목 (수동 생성 필요)
+
+### 3단계: 이미지 데이터 생성
+
+```bash
+# 주식 CSV 파일들을 차트 이미지로 변환
+python make_image.py
+```
+
+**출력 파일:**
+- `data_L5_R5.npz` - 이미지, 라벨, 날짜, 수익률, 티커 정보가 포함된 NumPy 압축 파일
+
+**주요 설정:**
+- `n_days=5`: 5일간의 데이터로 이미지 생성
+- 이미지 크기: 32x15 (가격 영역 4/5, 거래량 영역 1/5)
+- 멀티프로세싱 지원
+
+### 4단계: 모델 훈련
+
+```bash
+# CNN 모델 훈련 (1993-2000 데이터 사용)
 python train.py
-# 출력: cnn_L5_R5_model.keras
-
-# 3. 예측 수행
-python run_predictions.py
-# 출력: backtest_data_with_predictions.parquet
 ```
 
-### 2단계: WSTR 벤치마크 및 비교
+**출력 파일:**
+- `cnn_L5_R5_model_final.keras` - 훈련된 모델 가중치
+
+**훈련 설정:**
+- 훈련 데이터: 1993-01-01 ~ 2000-12-31
+- 테스트 데이터: 2001-01-01 이후
+- Early Stopping 적용 (patience=2)
+- Validation split: 0.3
+
+### 5단계: 예측 확률 저장
 
 ```bash
-# 4. WSTR 벤치마크 데이터 생성
-python make_wstr_npz.py
-# 출력: benchmark_data_WSTR.npz
-
-# 5. CNN vs WSTR 성과 비교
-python cnn_wstr_compare.py
-# 출력: cumulative_returns_COMPARISON.png
+# 테스트 데이터에 대한 예측 확률을 stocks_combined.csv에 저장
+python save_predictions.py
 ```
 
-### 선택 사항: 개별 CNN 백테스트
+**필터링 조건:**
+- NASDAQ 티커만 포함
+- Stale stocks 제외 (max_consecutive_days >= 60)
+
+**입력 파일:**
+- `data_L5_R5.npz`
+- `cnn_L5_R5_model_final.keras`
+- `nasdaq_yfinance_20200401/nasdaq_stocks_symbols.txt`
+- `stale_stocks_30days_plus.csv`
+- `nasdaq_yfinance_20200401/stocks_combined.csv`
+
+**출력 파일:**
+- `nasdaq_yfinance_20200401/stocks_combined.csv` (업데이트됨)
+
+### 6단계: Long/Short 전략 CSV 생성
 
 ```bash
-# CNN 전략만 개별적으로 백테스트 (선택 사항)
-python run_backtest.py
-# 출력: cumulative_returns_L5_R5.png
+# 날짜별로 probability_up이 가장 높은/낮은 종목 선택
+python create_longshort_csv.py
 ```
 
----
+**출력 파일:**
+- `longshort_2001_after.csv` - 날짜별 Long/Short 종목 정보
 
-## 주요 파일 설명
+## 스크립트 상세 설명
 
-### 입력 파일
-- `nasdaq_yfinance_20200401/stocks/**/*.csv`: 주식 OHLCV 데이터 (yfinance 형식)
+### `make_image.py`
 
-### 중간 파일
-- `data_L5_R5_with_returns.npz`: CNN 학습용 이미지 및 라벨
-- `benchmark_data_WSTR.npz`: WSTR 벤치마크 데이터
-- `cnn_L5_R5_model.keras`: 훈련된 CNN 모델
-- `backtest_data_with_predictions.parquet`: CNN 예측 결과
+주식 CSV 파일을 차트 이미지로 변환합니다.
 
-### 출력 파일
-- `cumulative_returns_COMPARISON.png`: CNN vs WSTR 비교 그래프
-- `cumulative_returns_L5_R5.png`: CNN 개별 백테스트 그래프 (선택)
+**주요 기능:**
+- `preprocess_data()`: yfinance CSV 전처리 (조정 수익률 계산, O/H/L factor 계산)
+- `generate_image_from_window()`: 롤링 윈도우로 차트 이미지 생성
+- `calculate_label_and_return()`: 향후 n일간의 수익률로 라벨 생성 (Up=1, Down=0)
+- `process_all_files()`: 멀티프로세싱으로 모든 CSV 파일 처리
 
----
+**이미지 생성 로직:**
+- 상대 가격 정규화 (첫날 종가 = 1.0)
+- 가격 영역: High-Low 바, Open/Close 점, 이동평균선
+- 거래량 영역: 하단 1/5 영역에 거래량 바
 
-## 데이터 분할 기준
+### `train.py`
 
-- **훈련/검증**: 1993-01-01 ~ 2000-12-31
-  - 내부적으로 7:3 랜덤 분할 (훈련 70%, 검증 30%)
-- **테스트**: 2001-01-01 ~ (데이터 끝까지)
-  - Out-of-Sample 테스트 (실제 성과 평가)
+CNN 모델을 구축하고 훈련합니다.
 
----
+**모델 아키텍처:**
+```
+Input (32, 15, 1)
+  ↓
+Conv2D(64, (5,3)) + BatchNorm + LeakyReLU + MaxPool(2,1)
+  ↓
+Conv2D(128, (5,3)) + BatchNorm + LeakyReLU + MaxPool(2,1)
+  ↓
+Flatten + Dropout(0.5)
+  ↓
+Dense(2, softmax)  # Up/Down 확률
+```
 
-## 주요 파라미터
+**훈련 설정:**
+- Optimizer: Adam (lr=1e-5)
+- Loss: Categorical Crossentropy
+- Batch size: 128
+- Epochs: 50 (Early Stopping)
 
-### 이미지 생성 (`make_npz.py`)
-- `n_days`: 5, 20, 60 중 선택
-- 이미지 크기: 자동 계산 (n_days * 3px 너비)
+### `filter_nasdaq_stocks.py`
 
-### 모델 훈련 (`train.py`)
-- Learning Rate: 1e-5
-- Batch Size: 128
-- Epochs: 50 (Early Stopping으로 조기 종료 가능)
-- Dropout: 0.5
+주요 거래소 상장 주식을 필터링합니다.
 
-### 백테스트 (`cnn_wstr_compare.py`)
-- 리밸런싱 주기: 주 1회 (월요일)
-- 십분위 분할: 10개 그룹
-- Winsorization: 1%, 99% quantile
+**필터링 조건:**
+- ETF 제외 (`ETF == 'N'`)
+- NextShares 제외
+- 테스트 이슈 제외 (`Test Issue == 'N'`)
+- 허용 거래소: Q (NASDAQ), N (NYSE), A (NYSE American), P (NYSE Arca)
+- 문제가 있는 재무 상태 제외 (D, E, H, S 제외)
 
----
+### `find_stale_stocks.py`
+
+Volume=0이고 가격이 변하지 않는 종목을 탐지합니다.
+
+**탐지 조건:**
+- Volume = 0
+- Open, High, Low, Close가 전날과 동일
+- 1993-01-01 이후 데이터만 검사
+
+**출력 정보:**
+- 최대 연속 일수 (`max_consecutive_days`)
+- 전체 stale 일수 (`total_stale_days`)
+- Stale 기간 리스트
+
+### `save_predictions.py`
+
+훈련된 모델로 테스트 데이터에 대한 예측 확률을 계산하고 저장합니다.
+
+**주요 기능:**
+- 테스트 데이터 로드 (2001-01-01 이후)
+- NASDAQ 티커 필터링
+- Stale stocks 제외 (max_consecutive_days >= 60)
+- 예측 확률을 `stocks_combined.csv`에 병합
+
+### `create_longshort_csv.py`
+
+날짜별로 Long/Short 전략 종목을 선택합니다.
+
+**선택 기준:**
+- Long: `probability_up`이 가장 높은 종목
+- Short: `probability_up`이 가장 낮은 종목
+- Volume > 0인 종목만 선택
+
+**출력 컬럼:**
+- Date, Long, long_close, long_ret5, long_prob_up
+- Short, short_close, short_ret5, short_prob_up
+
+## 데이터 형식
+
+### 입력 CSV 형식 (yfinance)
+
+```csv
+Date,Open,High,Low,Close,Adj Close,Volume
+2020-01-01,100.0,105.0,99.0,103.0,103.0,1000000
+...
+```
+
+### NPZ 파일 형식 (`data_L5_R5.npz`)
+
+```python
+{
+    'images': np.array,      # (N, 32, 15, 1) uint8
+    'labels': np.array,      # (N,) uint8 (0=Down, 1=Up)
+    'dates': np.array,       # (N,) str 'YYYY-MM-DD'
+    'returns': np.array,     # (N,) float32 (실제 수익률)
+    'tickers': np.array      # (N,) str (티커 심볼)
+}
+```
+
+### stocks_combined.csv 형식
+
+```csv
+ticker,date,Open,High,Low,Close,Adj Close,Volume,ret5,probability_up
+AAPL,2020-01-01,100.0,105.0,99.0,103.0,103.0,1000000,0.05,0.65
+...
+```
+
+## 요구사항
+
+### Python 패키지
+
+```
+tensorflow>=2.0
+keras>=2.0
+numpy
+pandas
+opencv-python
+tqdm
+```
+
+### 데이터 파일
+
+1. `nasdaq_yfinance_20200401/symbols_valid_meta.csv` - 원본 심볼 메타데이터
+2. `nasdaq_yfinance_20200401/stocks/*.csv` - 개별 주식 CSV 파일들
+3. `nasdaq_yfinance_20200401/stocks_combined.csv` - 통합 주식 데이터 (선택사항)
+
+### 하드웨어
+
+- 멀티프로세싱을 위한 다중 CPU 코어 권장
+- GPU 사용 시 TensorFlow GPU 버전 설치 필요
 
 ## 주의사항
 
-1. **메모리 사용량**: 대용량 데이터 처리 시 충분한 RAM 필요
-2. **실행 시간**: 
-   - `make_npz.py`: 멀티프로세싱 사용, 수 시간 소요 가능
-   - `train.py`: GPU 사용 시 빠름, CPU만 사용 시 수 시간 소요
-   - `run_predictions.py`: 대용량 테스트셋 예측 시 시간 소요
-3. **파일 의존성**: 각 스크립트는 이전 단계의 출력 파일이 필요
-4. **데이터 경로**: `stocks_folder` 경로를 실제 환경에 맞게 수정 필요
-
----
-
-## 문제 해결
-
-### NPZ 파일을 찾을 수 없음
-- `make_npz.py`를 먼저 실행했는지 확인
-- 파일 경로가 올바른지 확인
-
-### 모델 파일을 찾을 수 없음
-- `train.py`를 먼저 실행했는지 확인
-- 모델 훈련이 완료되었는지 확인
-
-### 메모리 부족 오류
-- 배치 크기 줄이기
-- 멀티프로세싱 워커 수 줄이기 (`num_workers` 파라미터)
-- 데이터를 더 작은 단위로 분할
-
----
+1. **실행 순서 준수**: 스크립트는 순차적으로 실행해야 합니다.
+2. **메모리 관리**: 대용량 데이터셋 처리 시 충분한 메모리 필요
+3. **Stale stocks 필터**: `stale_stocks_30days_plus.csv`는 `find_stale_stocks.py` 실행 후 수동으로 생성하거나 필터링해야 합니다.
+4. **날짜 형식**: 모든 날짜는 'YYYY-MM-DD' 형식을 사용합니다.
 
 ## 참고
 
-이 시스템은 논문 "Image-based Stock Price Prediction using CNN"의 구현을 기반으로 합니다.
-- 차트 이미지 생성 로직은 논문의 스케일링 방법을 따릅니다
-- CNN 아키텍처는 논문 Figure 3을 참조합니다
-- 데이터 분할 및 백테스트 방법은 논문의 실험 설계를 따릅니다
-
+- 논문 기반 아키텍처 사용
+- 시계열 데이터 분할 (1993-2000: 훈련, 2001-: 테스트)
+- 멀티프로세싱으로 이미지 생성 속도 향상
+- 메모리 효율적인 NPZ 형식 사용
