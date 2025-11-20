@@ -140,10 +140,96 @@ python create_longshort_csv.py
 - `calculate_label_and_return()`: 향후 n일간의 수익률로 라벨 생성 (Up=1, Down=0)
 - `process_all_files()`: 멀티프로세싱으로 모든 CSV 파일 처리
 
-**이미지 생성 로직:**
-- 상대 가격 정규화 (첫날 종가 = 1.0)
-- 가격 영역: High-Low 바, Open/Close 점, 이동평균선
-- 거래량 영역: 하단 1/5 영역에 거래량 바
+**데이터 전처리 상세 (`preprocess_data()`):**
+
+1. **날짜 처리**
+   - `Date` 컬럼 존재 여부 확인
+   - `Date` 컬럼을 `pd.to_datetime()`으로 변환
+   - 날짜를 인덱스로 설정하고 오름차순 정렬
+
+2. **데이터 필터링**
+   - 1993-01-01 이전 데이터 제거 (논문 기준 시작 날짜)
+   - 최소 데이터 길이 확인: 10일 미만인 경우 제외
+
+3. **조정 수익률 계산**
+   - `AdjReturn = Adj Close.pct_change()`: 조정 종가의 일일 수익률 계산
+   - 첫 번째 행은 수익률이 NaN이므로 제거
+
+4. **가격 Factor 계산**
+   - `Close`가 0인 경우 1e-9로 대체 (0으로 나누기 방지)
+   - `Open_factor = Open / Close`: 시가를 종가 대비 비율로 변환
+   - `High_factor = High / Close`: 고가를 종가 대비 비율로 변환
+   - `Low_factor = Low / Close`: 저가를 종가 대비 비율로 변환
+   - 목적: 절대 가격 대신 상대적 가격 변동 패턴 추출
+
+5. **데이터 정제**
+   - 무한대 값(`np.inf`, `-np.inf`)을 NaN으로 변환
+   - NaN 값이 포함된 행 제거 (`dropna()`)
+
+**이미지 생성 로직 (`generate_image_from_window()`):**
+
+1. **상대 가격 시리즈 생성**
+   - 누적 수익률 계산: `RelClose = (1 + AdjReturn).cumprod()`
+   - 첫날 종가를 1.0으로 정규화: `RelClose = RelClose / RelClose[0]`
+   - 상대 가격 재구성:
+     - `RelOpen = Open_factor × RelClose`
+     - `RelHigh = High_factor × RelClose`
+     - `RelLow = Low_factor × RelClose`
+
+2. **이동평균 계산**
+   - `MA = RelClose.rolling(window=n_days, min_periods=1).mean()`
+   - n일 이미지에 대해 n일 이동평균선 계산
+
+3. **스케일링 파라미터 계산**
+   - 가격 범위: `min_price`, `max_price` (RelOpen, RelHigh, RelLow, RelClose, MA 중 최소/최대)
+   - 거래량 범위: `max_volume` (해당 윈도우 내 최대 거래량)
+   - 가격 범위가 0인 경우 1.0으로 설정 (0으로 나누기 방지)
+
+4. **이미지 픽셀 매핑**
+   - 이미지 크기: 높이 32px (가격 영역 25.6px + 거래량 영역 6.4px), 너비 15px (5일 × 3px/일)
+   - 가격 스케일링: `y = (price_height - 1) × (1 - (price - min_price) / price_range)`
+     - 상단이 높은 가격, 하단이 낮은 가격 (Y축 반전)
+   - 거래량 스케일링: `height = (volume / max_volume) × (volume_height - 1)`
+
+5. **차트 요소 그리기 (벡터화 최적화)**
+   - **High-Low 바**: 각 날짜의 중앙 픽셀(x_center)에 y_high부터 y_low까지 수직선
+   - **Open 점**: 각 날짜의 왼쪽 픽셀(x_left)에 y_open 위치에 점
+   - **Close 점**: 각 날짜의 오른쪽 픽셀(x_right)에 y_close 위치에 점
+   - **이동평균선**: OpenCV `cv2.line()`으로 연속된 점들을 선으로 연결
+   - **거래량 바**: 하단 거래량 영역에 y_center 위치에서 아래로 거래량 높이만큼 수직선
+
+**라벨 계산 로직 (`calculate_label_and_return()`):**
+
+1. **누적 수익률 계산**
+   - 향후 n일간의 수익률: `cum_ret_factor = (1 + AdjReturn).prod()`
+   - 예: 5일간 각각 1%, 2%, -1%, 3%, 1% 수익 → `(1.01 × 1.02 × 0.99 × 1.03 × 1.01) ≈ 1.06`
+
+2. **라벨 생성**
+   - `cum_ret_factor > 1.0` → 라벨 = 1 (Up)
+   - `cum_ret_factor ≤ 1.0` → 라벨 = 0 (Down)
+
+3. **실제 수익률 계산**
+   - `actual_return = cum_ret_factor - 1.0`
+   - 예: `1.06 → 0.06` (6% 수익), `0.98 → -0.02` (-2% 손실)
+
+**롤링 윈도우 처리 (`process_single_file()`):**
+
+1. **윈도우 구성**
+   - 이미지 윈도우: i일부터 (i + n_days - 1)일까지 (n_days일간)
+   - 라벨 윈도우: (i + n_days)일부터 (i + 2×n_days - 1)일까지 (다음 n_days일간)
+   - 최소 데이터 길이: `n_days + n_days = 2×n_days` (이미지 + 라벨)
+
+2. **데이터 저장**
+   - 날짜: 이미지 윈도우의 마지막 날짜 (예측 시점)
+   - 형식: `'YYYY-MM-DD'` 문자열로 저장 (Timestamp 객체 대신)
+   - 티커: 파일명에서 추출 (예: `AAPL.csv` → `AAPL`)
+
+**최적화 기법:**
+
+- **벡터화 연산**: NumPy 배열 연산으로 픽셀 그리기 최적화
+- **멀티프로세싱**: `multiprocessing.Pool`로 여러 CSV 파일 병렬 처리
+- **메모리 효율**: uint8 (이미지), float32 (수익률) 사용
+- **에러 처리**: 빈 파일, 데이터 오류 등 예외 상황 처리
 
 ### `train.py`
 
