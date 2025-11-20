@@ -35,6 +35,7 @@ __pycache__/
 !nasdaq_yfinance_20200401/stocks_processed/*.csv
 !longshort_2001_after.csv
 !stale_stocks_30days_plus.csv
+!aapl_sample.csv
 # IDE
 .vscode/
 .idea/
