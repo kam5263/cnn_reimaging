@@ -21,14 +21,14 @@ IMAGE_DIMS = {
 
 def preprocess_data(df):
     """
-    yfinance CSV를 논문에 맞게 전처리합니다.
+    NYSE/NASDAQ TXT 파일을 논문에 맞게 전처리합니다.
     1. 날짜 인덱스 설정
-    2. 조정 수익률(AdjReturn) 계산
+    2. 조정 수익률(AdjReturn) 계산 (이미 adjusted된 Close 사용)
     3. O/H/L 가격을 종가 대비 비율(factor)로 계산
     """
-    # yfinance 데이터 형식에 맞춤
+    # NYSE/NASDAQ 데이터 형식에 맞춤
     if 'Date' not in df.columns:
-        # print("경고: 'Date' 컬럼이 CSV 파일에 없습니다.")
+        # print("경고: 'Date' 컬럼이 파일에 없습니다.")
         return None
         
     try:
@@ -46,8 +46,8 @@ def preprocess_data(df):
     if len(df) < 10:
         return None
 
-    # 'Adj Close'를 사용해 조정 수익률(RET) 계산
-    df['AdjReturn'] = df['Adj Close'].pct_change()
+    # 이미 adjusted된 'Close'를 사용해 조정 수익률(RET) 계산
+    df['AdjReturn'] = df['Close'].pct_change()
     
     # O, H, L 가격을 종가(Close) 대비 비율로 계산
     df['Close'] = df['Close'].replace(0, 1e-9)
@@ -197,12 +197,12 @@ def calculate_label_and_return(label_window_df):
 
 def process_single_file(filepath, n_days, img_config, min_length):
     """
-    단일 CSV 파일을 처리하여 (이미지, 라벨, 날짜, 수익률, 티커) 리스트를 반환합니다.
+    단일 TXT 파일을 처리하여 (이미지, 라벨, 날짜, 수익률, 티커) 리스트를 반환합니다.
     멀티프로세싱을 위해 분리된 함수입니다.
     """
     results = []
     
-    # 파일 경로에서 티커 추출 (예: 'nasdaq_yfinance_20200401/stocks/AAPL.csv' -> 'AAPL')
+    # 파일 경로에서 티커 추출 (예: 'nyse_nasdaq_nyse_20171011/Stocks/aap.us.txt' -> 'aap.us')
     ticker = os.path.splitext(os.path.basename(filepath))[0]
     
     try:
@@ -249,7 +249,7 @@ def process_single_file(filepath, n_days, img_config, min_length):
 
 def process_all_files(stocks_folder, output_file, n_days, num_workers=None):
     """
-    지정된 폴더의 모든 CSV를 읽어 (이미지, 라벨, 날짜) 쌍을 생성하고
+    지정된 폴더의 모든 TXT 파일을 읽어 (이미지, 라벨, 날짜) 쌍을 생성하고
     하나의 .npz 파일로 저장합니다.
     멀티프로세싱을 사용하여 속도를 향상시킵니다.
     """
@@ -262,16 +262,16 @@ def process_all_files(stocks_folder, output_file, n_days, num_workers=None):
     # 이미지 윈도우(n_days)와 라벨 윈도우(n_days)에 필요한 최소 일수
     min_length = n_days + n_days
     
-    # glob를 사용해 하위 폴더 포함 모든 csv 검색
-    search_path = os.path.join(stocks_folder, "**", "*.csv")
+    # glob를 사용해 하위 폴더 포함 모든 txt 파일 검색
+    search_path = os.path.join(stocks_folder, "**", "*.txt")
     
-    csv_files = glob.glob(search_path, recursive=True)
+    txt_files = glob.glob(search_path, recursive=True)
     
-    if not csv_files:
-        print(f"경고: '{search_path}' 경로에서 CSV 파일을 찾을 수 없습니다.")
+    if not txt_files:
+        print(f"경고: '{search_path}' 경로에서 TXT 파일을 찾을 수 없습니다.")
         return
 
-    print(f"총 {len(csv_files)}개의 CSV 파일 처리 시작 (n_days={n_days})...")
+    print(f"총 {len(txt_files)}개의 TXT 파일 처리 시작 (n_days={n_days})...")
     
     # 멀티프로세싱 설정
     if num_workers is None:
@@ -292,9 +292,9 @@ def process_all_files(stocks_folder, output_file, n_days, num_workers=None):
     with Pool(processes=num_workers) as pool:
         # tqdm을 사용한 진행바와 함께 멀티프로세싱 실행
         results_list = list(tqdm(
-            pool.imap(process_func, csv_files),
-            total=len(csv_files),
-            desc="CSV 파일 처리 중"
+            pool.imap(process_func, txt_files),
+            total=len(txt_files),
+            desc="TXT 파일 처리 중"
         ))
     
     # 결과 수집
@@ -352,7 +352,106 @@ def process_all_files(stocks_folder, output_file, n_days, num_workers=None):
         )
         print("저장 완료.")
     else:
-        print("생성된 데이터가 없습니다. CSV 파일과 경로를 확인하세요.")
+        print("생성된 데이터가 없습니다. TXT 파일과 경로를 확인하세요.")
+
+
+# --- 테스트 함수: 1개 종목만 처리 ---
+def test_single_stock(stocks_folder, output_file, n_days, ticker_name=None):
+    """
+    테스트용: 1개 종목만 처리하여 결과를 확인합니다.
+    
+    Args:
+        stocks_folder: 주식 파일이 있는 폴더 경로
+        output_file: 출력 파일명
+        n_days: 이미지 윈도우 크기
+        ticker_name: 처리할 티커명 (예: 'aap.us'). None이면 첫 번째 파일 사용
+    """
+    if n_days not in IMAGE_DIMS:
+        raise ValueError(f"n_days는 {list(IMAGE_DIMS.keys())} 중 하나여야 합니다.")
+        
+    img_config = IMAGE_DIMS[n_days]
+    min_length = n_days + n_days
+    
+    # 파일 찾기
+    search_path = os.path.join(stocks_folder, "**", "*.txt")
+    txt_files = glob.glob(search_path, recursive=True)
+    
+    if not txt_files:
+        print(f"경고: '{search_path}' 경로에서 TXT 파일을 찾을 수 없습니다.")
+        return
+    
+    # 티커명이 지정되면 해당 파일 찾기, 아니면 첫 번째 파일 사용
+    if ticker_name:
+        target_file = None
+        for f in txt_files:
+            if os.path.splitext(os.path.basename(f))[0] == ticker_name:
+                target_file = f
+                break
+        if target_file is None:
+            print(f"경고: '{ticker_name}' 티커를 찾을 수 없습니다.")
+            return
+    else:
+        target_file = txt_files[0]
+        ticker_name = os.path.splitext(os.path.basename(target_file))[0]
+    
+    print(f"테스트: '{ticker_name}' 종목 처리 중...")
+    print(f"파일 경로: {target_file}")
+    
+    # 단일 파일 처리
+    results = process_single_file(target_file, n_days, img_config, min_length)
+    
+    if not results:
+        print("경고: 처리된 데이터가 없습니다.")
+        return
+    
+    print(f"총 {len(results)}개의 (이미지, 라벨) 쌍이 생성되었습니다.")
+    
+    # 결과를 배열로 변환
+    all_images = []
+    all_labels = []
+    all_dates = []
+    all_actual_returns = []
+    all_tickers = []
+    
+    for image, label, date, actual_return, ticker in results:
+        all_images.append(image)
+        all_labels.append(label)
+        all_dates.append(date.strftime('%Y-%m-%d'))
+        all_actual_returns.append(actual_return)
+        all_tickers.append(ticker)
+    
+    # NumPy 배열로 변환
+    images_arr = np.array(all_images, dtype=np.uint8)
+    labels_arr = np.array(all_labels, dtype=np.uint8)
+    dates_arr = np.array(all_dates)
+    returns_arr = np.array(all_actual_returns, dtype=np.float32)
+    tickers_arr = np.array(all_tickers)
+    
+    # 채널 차원 추가
+    images_arr = np.expand_dims(images_arr, axis=-1)
+    
+    print(f"  이미지(X) 형태: {images_arr.shape}, dtype: {images_arr.dtype}")
+    print(f"  라벨(y) 형태: {labels_arr.shape}, dtype: {labels_arr.dtype}")
+    print(f"  날짜(meta) 형태: {dates_arr.shape}, dtype: {dates_arr.dtype}")
+    print(f"  실제 수익률(actual_return) 형태: {returns_arr.shape}, dtype: {returns_arr.dtype}")
+    print(f"  티커(tickers) 형태: {tickers_arr.shape}, dtype: {tickers_arr.dtype}")
+    
+    # 샘플 정보 출력
+    print(f"\n--- 샘플 정보 (처음 5개) ---")
+    for i in range(min(5, len(results))):
+        print(f"  [{i}] 날짜: {all_dates[i]}, 라벨: {all_labels[i]}, 수익률: {all_actual_returns[i]:.4f}")
+    
+    # 파일 저장
+    print(f"\n데이터를 '{output_file}' 파일로 저장 중...")
+    np.savez_compressed(
+        output_file,
+        images=images_arr,
+        labels=labels_arr,
+        dates=dates_arr,
+        returns=returns_arr,
+        tickers=tickers_arr
+    )
+    print("저장 완료.")
 
 
 # --- 4. 메인 코드 실행 ---
@@ -366,83 +465,20 @@ if __name__ == "__main__":
          except RuntimeError:
              pass # 이미 설정되었을 수 있음
 
-    # 5일 이미지/라벨
+    # === 테스트: 1개 종목만 처리 ===
+    # print("\n--- 테스트: 1개 종목 처리 ---")
+    # test_single_stock(
+    #     stocks_folder='nyse_nasdaq_nyse_20171011/Stocks',
+    #     output_file='data_L5_R5_nyse_test.npz',  # 테스트용 파일명
+    #     n_days=5,
+    #     ticker_name='aap.us'  # None이면 첫 번째 파일 사용
+    # )
+    
+    # === 전체 파일 처리 (주석 해제하여 사용) ===
     print("\n--- 4. 메인 파이프라인 실행 (5일 예제) ---")
     process_all_files(
-        stocks_folder='nasdaq_yfinance_20200401/stocks', # 5000개 이상의 csv 파일 존재
-        output_file='data_L5_R5.npz', # 새 이름으로 저장
+        stocks_folder='nyse_nasdaq_nyse_20171011/Stocks', # NYSE/NASDAQ TXT 파일들
+        output_file='data_L5_R5_nyse.npz', # 새 이름으로 저장
         n_days=5
     )
-    # 샘플 이미지 저장
-    # import matplotlib.pyplot as plt
 
-    # # 1. 불러올 NPZ 파일 이름 (수정된 파일)
-    # # (이 파일이 create_dataset_fixed.py와 동일한 경로에 있다고 가정)
-    # NPZ_FILE = 'data_L5_R5_appl.npz' 
-
-    # # 2. 확인할 랜덤 샘플 개수
-    # NUM_SAMPLES = 5
-
-    # data = None # data 객체를 try/finally에서 모두 접근할 수 있도록 초기화
-
-    # try:
-    #     print(f"'{NPZ_FILE}' 파일 로드 중 (mmap_mode='r')...")
-    #     # mmap_mode='r' : 파일을 메모리에 올리지 않고, 디스크에 연결만 합니다.
-    #     data = np.load(NPZ_FILE, allow_pickle=True, mmap_mode='r')
-        
-    #     # 3. 데이터 배열 '포인터' 가져오기 (이 시점엔 메모리 차지 안 함)
-    #     images = data['images']
-    #     labels = data['labels']
-    #     dates = data['dates']
-    #     returns = data['returns']
-        
-    #     total_count = len(images)
-        
-    #     if total_count == 0:
-    #         print("오류: 파일에 데이터가 없습니다.")
-    #     else:
-    #         print(f"파일 로드 성공. 총 {total_count}개의 샘플 발견.")
-
-    #         # 4. 전체 샘플 중 NUM_SAMPLES 개수만큼 랜덤 인덱스 추출
-    #         # replace=False : 중복 없이 뽑기
-    #         random_indices = np.random.choice(total_count, NUM_SAMPLES, replace=False)
-    #         random_indices.sort() # 보기 좋게 정렬
-            
-    #         print(f"\n--- {NUM_SAMPLES}개의 랜덤 샘플 정보 (인덱스: {random_indices}) ---")
-
-    #         # 5. 랜덤 인덱스를 하나씩 돌면서 "실제로" 데이터 읽기
-    #         for i, index in enumerate(random_indices):
-    #             print(f"\n--- {i+1}번째 샘플 (전체 인덱스: {index}) ---")
-                
-    #             # 🚨 이 시점에 디스크에서 딱 해당 인덱스의 데이터만 읽어옵니다.
-    #             sample_image = images[index]
-    #             sample_label = labels[index]
-    #             sample_date = dates[index]
-    #             sample_return = returns[index]
-                
-    #             print(f"  - 날짜 (Date): {sample_date}")
-    #             print(f"  - 라벨 (Label): {sample_label} (0=Down, 1=Up)")
-    #             print(f"  - 실제 수익률 (Return): {sample_return:.4f}")
-    #             print(f"  - 이미지 형태: {sample_image.shape}")
-                
-    #             # 6. 이미지 시각화
-    #             plt.figure(figsize=(6, 4))
-    #             # (32, 15, 1) 형태를 (32, 15)로 변경하여 흑백 이미지로 표시
-    #             plt.imshow(np.squeeze(sample_image), cmap='gray', aspect='auto')
-    #             plt.title(f"Sample Index: {index} | Date: {sample_date} | Label: {sample_label}")
-    #             plt.xlabel("Features (Time steps)")
-    #             plt.ylabel("Channels (LOB data)")
-    #             plt.savefig(f"sample_{index}.png")
-
-    # except FileNotFoundError:
-    #     print(f"오류: '{NPZ_FILE}' 파일을 찾을 수 없습니다.")
-    # except KeyError:
-    #     print("오류: .npz 파일에 'images', 'labels', 'dates', 'returns' 키 중 하나가 없습니다.")
-    # except Exception as e:
-    #     print(f"파일 로드 중 알 수 없는 오류 발생: {e}")
-
-    # finally:
-    #     # 7. (매우 중요) mmap_mode로 열었으면 반드시 닫아주어야 합니다.
-    #     if data is not None and hasattr(data, 'close'):
-    #         data.close()
-    #         print("\n파일 핸들(mmap)을 닫았습니다.")

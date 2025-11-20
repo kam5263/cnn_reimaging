@@ -1,19 +1,18 @@
 import pandas as pd
 import os
 
-# 입력 파일 경로
-input_file = 'nasdaq_yfinance_20200401/stocks_combined.csv'
-# 출력 파일 경로
-output_file = 'longshort_2001_after.csv'
+# --- NYSE 데이터 설정 ---
+STOCKS_COMBINED_CSV = 'nyse_nasdaq_nyse_20171011/stocks_combined.csv'  # 주식 데이터 CSV 파일
+OUTPUT_FILE = 'longshort_nyse_2001_after.csv'  # 출력 파일 경로
 
-print(f"'{input_file}' 파일 로드 중...")
+print(f"'{STOCKS_COMBINED_CSV}' 파일 로드 중...")
 
 # CSV 파일을 청크 단위로 읽어서 2001-01-01 이후 데이터만 필터링
 chunk_size = 100000
 chunks = []
 
 print("CSV 파일을 읽고 2001-01-01 이후 데이터 필터링 중...")
-for chunk in pd.read_csv(input_file, chunksize=chunk_size):
+for chunk in pd.read_csv(STOCKS_COMBINED_CSV, chunksize=chunk_size):
     # 날짜를 datetime으로 변환
     chunk['date'] = pd.to_datetime(chunk['date'])
     
@@ -69,11 +68,11 @@ for date, group in df.groupby('date'):
     result_row = {
         'Date': date.strftime('%Y-%m-%d'),
         'Long': long_row['ticker'],
-        'long_close': long_row['Adj Close'],
+        'long_close': long_row['Close'],
         'long_ret5': long_row['ret5'],
         'long_prob_up': long_row['probability_up'],
         'Short': short_row['ticker'],
-        'short_close': short_row['Adj Close'],
+        'short_close': short_row['Close'],
         'short_ret5': short_row['ret5'],
         'short_prob_up': short_row['probability_up']
     }
@@ -87,8 +86,8 @@ result_df = pd.DataFrame(result_rows)
 result_df = result_df.sort_values('Date').reset_index(drop=True)
 
 # CSV 파일로 저장
-print(f"\n결과를 '{output_file}' 파일로 저장 중...")
-result_df.to_csv(output_file, index=False)
+print(f"\n결과를 '{OUTPUT_FILE}' 파일로 저장 중...")
+result_df.to_csv(OUTPUT_FILE, index=False)
 
 print(f"완료! 총 {len(result_df)}개 날짜의 데이터가 저장되었습니다.")
 print(f"\n샘플 데이터 (처음 5개 행):")

@@ -3,13 +3,13 @@ import matplotlib.pyplot as plt
 import os
 
 # 1. 확인할 .npz 파일 이름
-npz_file = 'data_L5_R5_with_returns.npz'
+npz_file = 'data_L5_R5_nyse_test.npz'
 
 # 2. 확인할 샘플 번호
 sample_index = 200 
 
 # 3. 저장할 이미지 파일 이름
-output_image_file = 'check_L5_R5_sample2.png'
+output_image_file = 'check_L5_R5_sample3.png'
 
 print(f"'{npz_file}' 파일 로드 중...")
 
@@ -21,14 +21,15 @@ except FileNotFoundError:
     exit()
 
 # 5. npz 파일 내부의 데이터 배열에 접근
-# (저장 시 사용한 'images', 'labels', 'dates', 'returns' 키를 사용합니다)
+# (저장 시 사용한 'images', 'labels', 'dates', 'returns', 'tickers' 키를 사용합니다)
 try:
     images = data['images']
     labels = data['labels']
     dates = data['dates']
     returns = data['returns']
+    tickers = data['tickers']
 except KeyError:
-    print("오류: .npz 파일에 'images', 'labels', 'dates', 'returns' 키가 없습니다.")
+    print("오류: .npz 파일에 'images', 'labels', 'dates', 'returns', 'tickers' 키가 없습니다.")
     data.close()
     exit()
 
@@ -38,11 +39,12 @@ print(f"  이미지(X) 형태: {images.shape}") # (N, 32, 15, 1)
 # 6. 샘플 데이터 확인
 if len(images) > sample_index:
     
-    # 100번째 샘플 이미지, 라벨, 날짜, 수익률 가져오기
+    # 샘플 이미지, 라벨, 날짜, 수익률, 티커 가져오기
     sample_image = images[sample_index]
     sample_label = labels[sample_index]
     sample_date = dates[sample_index]
     sample_return = returns[sample_index]
+    sample_ticker = tickers[sample_index]
 
     # 날짜 포맷팅 (타입에 따라 다르게 처리)
     if isinstance(sample_date, np.datetime64):
@@ -51,8 +53,17 @@ if len(images) > sample_index:
         date_str = sample_date
     else:
         date_str = str(sample_date)
+    
+    # 티커 포맷팅 (문자열로 변환)
+    if isinstance(sample_ticker, (bytes, np.bytes_)):
+        ticker_str = sample_ticker.decode('utf-8')
+    elif isinstance(sample_ticker, np.str_):
+        ticker_str = str(sample_ticker)
+    else:
+        ticker_str = str(sample_ticker)
 
     print(f"\n--- {sample_index}번째 샘플 정보 ---")
+    print(f"  티커: {ticker_str}")
     print(f"  날짜: {date_str}") # 날짜 포맷팅
     print(f"  라벨: {sample_label} ({'UP' if sample_label == 1 else 'DOWN/STAY'})")
     print(f"  실제 수익률: {sample_return:.4f} ({sample_return*100:.2f}%)")
@@ -71,8 +82,8 @@ if len(images) > sample_index:
     # interpolation='nearest'는 픽셀을 흐릿하게 만들지 않고 확대합니다.
     plt.imshow(img_to_save, cmap='gray', interpolation='nearest')
     
-    # 이미지에 제목으로 라벨, 날짜, 수익률 추가
-    plt.title(f"Sample: {sample_index}\nDate: {date_str}\nLabel: {sample_label}\nReturn: {sample_return:.4f} ({sample_return*100:.2f}%)")
+    # 이미지에 제목으로 티커, 라벨, 날짜, 수익률 추가
+    plt.title(f"Ticker: {ticker_str}\nSample: {sample_index} | Date: {date_str}\nLabel: {sample_label} | Return: {sample_return:.4f} ({sample_return*100:.2f}%)")
     
     # 파일로 저장
     plt.savefig(output_image_file, dpi=100) # dpi=100 -> (300x640) 픽셀 크기

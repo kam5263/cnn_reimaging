@@ -25,6 +25,7 @@
 
 ```
 .
+├── process_stocks_data.py     # 개별 CSV 파일을 통합 CSV로 변환
 ├── make_image.py              # 주식 데이터를 이미지로 변환
 ├── train.py                   # CNN 모델 훈련
 ├── filter_nasdaq_stocks.py    # NASDAQ 주식 필터링
@@ -42,6 +43,28 @@
 ```
 
 ## 실행 순서
+
+### 0단계: 주식 데이터 통합 (선택사항)
+
+```bash
+# 개별 CSV 파일들을 하나의 통합 CSV 파일로 변환
+python process_stocks_data.py
+```
+
+**입력 파일:**
+- `nasdaq_yfinance_20200401/stocks/*.csv` - 개별 주식 CSV 파일들
+
+**출력 파일:**
+- `nasdaq_yfinance_20200401/stocks_combined.csv` - 통합된 주식 데이터
+
+**주요 기능:**
+- 멀티프로세싱으로 여러 CSV 파일 병렬 처리
+- 1993-01-01 이후 데이터만 필터링
+- 이동평균(ma5, ma20) 계산
+- 미래 수익률(ret1, ret5, ret20) 계산
+- 메모리 효율적인 청크 방식으로 대용량 데이터 처리
+
+**참고:** 이 단계는 선택사항입니다. `make_image.py`는 개별 CSV 파일을 직접 읽을 수 있으므로, 통합 CSV 파일이 필요한 경우에만 실행하세요.
 
 ### 1단계: 데이터 필터링
 
@@ -129,6 +152,94 @@ python create_longshort_csv.py
 - `longshort_2001_after.csv` - 날짜별 Long/Short 종목 정보
 
 ## 스크립트 상세 설명
+
+### `process_stocks_data.py`
+
+개별 주식 CSV 파일들을 전처리하고 하나의 통합 CSV 파일로 합칩니다.
+
+**주요 기능:**
+- `preprocess_data()`: yfinance CSV 전처리 (날짜 인덱스 설정, 이동평균 계산, 미래 수익률 계산)
+- `process_single_file()`: 단일 CSV 파일 처리 및 티커 컬럼 추가
+- `process_all_files()`: 멀티프로세싱으로 모든 CSV 파일 처리 및 통합
+
+**데이터 전처리 상세 (`preprocess_data()`):**
+
+1. **날짜 처리**
+   - `Date` 컬럼 존재 여부 확인
+   - `Date` 컬럼을 `pd.to_datetime()`으로 변환
+   - 날짜를 인덱스로 설정하고 오름차순 정렬
+
+2. **데이터 필터링**
+   - 1993-01-01 이전 데이터 제거 (논문 기준 시작 날짜)
+   - 최소 데이터 길이 확인: 20일 미만인 경우 제외
+
+3. **가격 데이터 정제**
+   - `Close`와 `Adj Close`가 0인 경우 1e-9로 대체 (0으로 나누기 방지)
+
+4. **이동평균 계산**
+   - `ma5`: 5일 이동평균 (`Adj Close.rolling(window=5, min_periods=1).mean()`)
+   - `ma20`: 20일 이동평균 (`Adj Close.rolling(window=20, min_periods=1).mean()`)
+
+5. **미래 수익률 계산**
+   - `ret1`: 1일 후 수익률 (`Adj Close.shift(-1) / Adj Close - 1.0`)
+   - `ret5`: 5일 후 수익률 (`Adj Close.shift(-5) / Adj Close - 1.0`)
+   - `ret20`: 20일 후 수익률 (`Adj Close.shift(-20) / Adj Close - 1.0`)
+
+6. **데이터 정제**
+   - 무한대 값(`np.inf`, `-np.inf`)을 NaN으로 변환
+   - `ret1`, `ret5`, `ret20`이 모두 NaN인 행 제거 (미래 데이터가 없는 마지막 행들)
+
+**파일 처리 로직 (`process_single_file()`):**
+
+1. **CSV 파일 읽기**
+   - `pd.read_csv()`로 파일 읽기
+   - `preprocess_data()`로 전처리 수행
+
+2. **티커 추출**
+   - 파일명에서 티커 추출 (예: `AAPL.csv` → `AAPL`)
+   - 티커 컬럼을 맨 앞에 추가
+
+3. **컬럼 선택 및 정리**
+   - 필요한 컬럼만 선택: `Open`, `High`, `Low`, `Close`, `Adj Close`, `Volume`, `ma5`, `ma20`, `ret1`, `ret5`, `ret20`
+   - 인덱스(Date)를 컬럼으로 변환하고 `date`로 이름 변경
+
+**통합 처리 로직 (`process_all_files()`):**
+
+1. **파일 검색**
+   - `glob.glob()`로 하위 폴더 포함 모든 CSV 파일 검색
+   - 재귀적 검색 지원 (`**/*.csv`)
+
+2. **멀티프로세싱 처리**
+   - `multiprocessing.Pool`로 여러 CSV 파일 병렬 처리
+   - 기본값: CPU 코어 수 - 1 (최소 1개)
+   - `tqdm`으로 진행 상황 표시
+
+3. **메모리 효율적인 청크 처리**
+   - 청크 크기: 100개 파일씩 묶어서 처리
+   - 각 청크를 임시 CSV 파일로 저장
+   - 모든 임시 파일을 하나로 병합
+
+4. **데이터 정렬**
+   - 파일 크기가 500MB 미만인 경우에만 정렬 수행
+   - 정렬 기준: `ticker`, `date` (오름차순)
+   - 메모리 부족 시 정렬 건너뛰기
+
+**출력 컬럼:**
+- `ticker`: 주식 티커 심볼
+- `date`: 날짜 (YYYY-MM-DD)
+- `Open`, `High`, `Low`, `Close`, `Adj Close`, `Volume`: OHLCV 데이터
+- `ma5`, `ma20`: 이동평균
+- `ret1`, `ret5`, `ret20`: 미래 수익률
+
+**최적화 기법:**
+- **멀티프로세싱**: 여러 CSV 파일 병렬 처리로 속도 향상
+- **청크 처리**: 대용량 데이터를 메모리 효율적으로 처리
+- **임시 파일 활용**: 메모리 사용량 최소화
+- **에러 처리**: 빈 파일, 데이터 오류 등 예외 상황 처리
+
+**플랫폼 호환성:**
+- Windows가 아닌 경우 `multiprocessing` 시작 방식을 `spawn`으로 설정
+- Colab 등 다양한 환경에서 동작 가능
 
 ### `make_image.py`
 
@@ -399,6 +510,16 @@ Date,Open,High,Low,Close,Adj Close,Volume
 ```
 
 ### stocks_combined.csv 형식
+
+`process_stocks_data.py`로 생성된 통합 CSV 파일 형식:
+
+```csv
+ticker,date,Open,High,Low,Close,Adj Close,Volume,ma5,ma20,ret1,ret5,ret20
+AAPL,2020-01-01,100.0,105.0,99.0,103.0,103.0,1000000,102.5,101.0,0.01,0.05,0.10
+...
+```
+
+`save_predictions.py` 실행 후 예측 확률이 추가된 형식:
 
 ```csv
 ticker,date,Open,High,Low,Close,Adj Close,Volume,ret5,probability_up

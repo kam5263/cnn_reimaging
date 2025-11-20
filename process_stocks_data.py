@@ -9,13 +9,13 @@ import platform
 
 def preprocess_data(df):
     """
-    yfinance CSV를 전처리합니다.
+    NYSE/NASDAQ TXT 파일을 전처리합니다.
     1. 날짜 인덱스 설정
     2. 1993-01-01 이후 데이터 필터링
     3. 이동평균 계산 (ma5, ma20)
     4. 미래 수익률(ret1, ret5, ret20) 계산
     """
-    # yfinance 데이터 형식에 맞춤
+    # NYSE/NASDAQ 데이터 형식에 맞춤
     if 'Date' not in df.columns:
         return None
         
@@ -35,21 +35,21 @@ def preprocess_data(df):
 
     # Close가 0인 경우 처리
     df['Close'] = df['Close'].replace(0, 1e-9)
-    df['Adj Close'] = df['Adj Close'].replace(0, 1e-9)
     
     # 이동평균 계산 (5일, 20일 이동평균)
-    df['ma5'] = df['Adj Close'].rolling(window=5, min_periods=1).mean()
-    df['ma20'] = df['Adj Close'].rolling(window=20, min_periods=1).mean()
+    # NYSE/NASDAQ 데이터는 이미 adjusted된 Close를 사용
+    df['ma5'] = df['Close'].rolling(window=5, min_periods=1).mean()
+    df['ma20'] = df['Close'].rolling(window=20, min_periods=1).mean()
     
     # 미래 수익률 계산
     # ret1: 1일 후 수익률
-    df['ret1'] = df['Adj Close'].shift(-1) / df['Adj Close'] - 1.0
+    df['ret1'] = df['Close'].shift(-1) / df['Close'] - 1.0
     
     # ret5: 5일 후 수익률
-    df['ret5'] = df['Adj Close'].shift(-5) / df['Adj Close'] - 1.0
+    df['ret5'] = df['Close'].shift(-5) / df['Close'] - 1.0
     
     # ret20: 20일 후 수익률
-    df['ret20'] = df['Adj Close'].shift(-20) / df['Adj Close'] - 1.0
+    df['ret20'] = df['Close'].shift(-20) / df['Close'] - 1.0
     
     # 무한대/NaN 값 제거
     df = df.replace([np.inf, -np.inf], np.nan)
@@ -78,8 +78,9 @@ def process_single_file(filepath):
         stock_symbol = os.path.splitext(filename)[0]
         
         # 필요한 컬럼만 선택
+        # NYSE/NASDAQ 데이터에는 Adj Close가 없으므로 Close만 사용
         output_df = df_processed[[
-            'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume',
+            'Open', 'High', 'Low', 'Close', 'Volume',
             'ma5', 'ma20', 'ret1', 'ret5', 'ret20'
         ]].copy()
         
@@ -107,7 +108,7 @@ def process_all_files(input_folder, output_file, num_workers=None):
     멀티프로세싱을 사용하여 속도를 향상시킵니다.
     """
     # glob를 사용해 하위 폴더 포함 모든 csv 검색
-    search_path = os.path.join(input_folder, "**", "*.csv")
+    search_path = os.path.join(input_folder, "**", "*.txt")
     csv_files = glob.glob(search_path, recursive=True)
     
     if not csv_files:
@@ -245,8 +246,8 @@ if __name__ == "__main__":
     
     print("--- 주식 데이터 전처리 시작 ---")
     process_all_files(
-        input_folder='nasdaq_yfinance_20200401/stocks',
-        output_file='nasdaq_yfinance_20200401/stocks_combined.csv',
+        input_folder='nyse_nasdaq_nyse_20171011/Stocks',
+        output_file='nyse_nasdaq_nyse_20171011/stocks_combined.csv',
         num_workers=None  # 자동으로 CPU 코어 수에 맞춤
     )
     print("\n--- 전처리 완료 ---")

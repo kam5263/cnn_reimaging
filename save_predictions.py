@@ -10,13 +10,13 @@ import pandas as pd
 import os
 
 # --- 1. 상수 정의 ---
-NPZ_FILE = 'data_L5_R5.npz'  # 이전 단계에서 생성한 NPZ 파일
+NPZ_FILE = 'data_L5_R5_nyse.npz'  # 이전 단계에서 생성한 NPZ 파일
 IMAGE_SHAPE = (32, 15, 1)     # 5-day 이미지 크기 (Height, Width, Channels)
 NUM_CLASSES = 2               # 'Up' / 'Down' (2개 클래스)
-MODEL_SAVE_PATH = 'cnn_L5_R5_model_final.keras' # 훈련된 모델 저장 경로
-STOCKS_COMBINED_CSV = 'nasdaq_yfinance_20200401/stocks_combined.csv'  # 주식 데이터 CSV 파일
-NASDAQ_SYMBOLS_FILE = 'nasdaq_yfinance_20200401/nasdaq_stocks_symbols.txt'  # NASDAQ 티커 목록 파일
-STALE_STOCKS_FILE = 'stale_stocks_30days_plus.csv'  # Stale stocks 필터링 파일
+MODEL_SAVE_PATH = 'cnn_L5_R5_nyse_model_final.keras' # 훈련된 모델 저장 경로
+STOCKS_COMBINED_CSV = 'nyse_nasdaq_nyse_20171011/stocks_combined.csv'  # 주식 데이터 CSV 파일
+#NASDAQ_SYMBOLS_FILE = 'nyse_nasdaq_nyse_20171011/nasdaq_stocks_symbols.txt'  # NASDAQ 티커 목록 파일
+#STALE_STOCKS_FILE = 'nyse_nasdaq_nyse_20171011/stale_stocks_30days_plus.csv'  # Stale stocks 필터링 파일
 
 # --- 2. CNN 모델 구축 함수 ---
 
@@ -235,12 +235,12 @@ if __name__ == "__main__":
         exit()  # 데이터 로드 실패 시 종료
     
     # 2-1. NASDAQ 티커 목록 로드 및 필터링
-    nasdaq_symbols = load_nasdaq_symbols(NASDAQ_SYMBOLS_FILE)
-    X_test, dates_test, tickers_test = filter_by_nasdaq_symbols(X_test, dates_test, tickers_test, nasdaq_symbols)
+    #nasdaq_symbols = load_nasdaq_symbols(NASDAQ_SYMBOLS_FILE)
+    #X_test, dates_test, tickers_test = filter_by_nasdaq_symbols(X_test, dates_test, tickers_test, nasdaq_symbols)
     
     # 2-2. Stale stocks (max_consecutive_days >= 60) 제외 필터링
-    excluded_stale_tickers = load_stale_stocks_exclusions(STALE_STOCKS_FILE)
-    X_test, dates_test, tickers_test = filter_by_stale_stocks(X_test, dates_test, tickers_test, excluded_stale_tickers)
+    #excluded_stale_tickers = load_stale_stocks_exclusions(STALE_STOCKS_FILE)
+    #X_test, dates_test, tickers_test = filter_by_stale_stocks(X_test, dates_test, tickers_test, excluded_stale_tickers)
     
     # --- 3. 테스트 예측 확률을 stocks_combined.csv에 저장 ---
     print("\n--- 테스트 예측 확률을 stocks_combined.csv에 저장 중... ---")

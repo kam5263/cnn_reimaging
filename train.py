@@ -12,11 +12,10 @@ import pandas as pd
 import os
 
 # --- 1. 상수 정의 ---
-NPZ_FILE = 'data_L5_R5.npz'  # 이전 단계에서 생성한 NPZ 파일
+NPZ_FILE = 'data_L5_R5_nyse.npz'  # 이전 단계에서 생성한 NPZ 파일
 IMAGE_SHAPE = (32, 15, 1)     # 5-day 이미지 크기 (Height, Width, Channels)
 NUM_CLASSES = 2               # 'Up' / 'Down' (2개 클래스)
-MODEL_SAVE_PATH = 'cnn_L5_R5_model_final.keras' # 훈련된 모델 저장 경로
-STOCKS_COMBINED_CSV = 'nasdaq_yfinance_20200401/stocks_combined.csv'  # 주식 데이터 CSV 파일
+MODEL_SAVE_PATH = 'cnn_L5_R5_nyse_model_final.keras' # 훈련된 모델 저장 경로
 
 # --- 2. 데이터 로드 함수 ---
 
@@ -53,7 +52,8 @@ def load_data(npz_path):
     # 픽셀 값은 0-255이므로 uint8이 효율적
     # 모델에 입력 시 Keras가 자동으로 0-1 사이 float로 정규화
     images = images.astype('uint8') 
-    labels_categorical = labels_categorical.astype('uint8')
+    # 원-핫 인코딩된 라벨은 float32로 유지 (Keras의 categorical_crossentropy에 적합)
+    labels_categorical = labels_categorical.astype('float32')
     
     return images, labels_categorical, dates, tickers
 
@@ -121,11 +121,16 @@ if __name__ == "__main__":
     print("\n--- 데이터셋 분할 (시계열 기준) ---")
     
     # 'dates' 배열을 NumPy datetime 객체로 변환 (비교를 위해)
-    # data_L5_R5.npz 생성 시 저장된 날짜 형식을 'datetime64[D]'로 통일
+    # make_image_nyse.py에서 날짜를 문자열('YYYY-MM-DD')로 저장했으므로 변환 필요
     try:
-        dates_np = dates.astype('datetime64[D]')
-    except ValueError:
-        print("오류: 'dates' 배열을 날짜로 변환할 수 없습니다. .npz 파일을 확인하세요.")
+        # 문자열 배열인 경우 pd.to_datetime으로 변환 후 numpy datetime으로 변환
+        if dates.dtype.kind == 'U' or dates.dtype.kind == 'S':  # 문자열 타입
+            dates_np = pd.to_datetime(dates).values.astype('datetime64[D]')
+        else:
+            dates_np = dates.astype('datetime64[D]')
+    except (ValueError, TypeError) as e:
+        print(f"오류: 'dates' 배열을 날짜로 변환할 수 없습니다: {e}")
+        print(f"  dates dtype: {dates.dtype}, sample: {dates[:3] if len(dates) >= 3 else dates}")
         exit()
 
     # 논문 기준 분할 날짜 

@@ -126,20 +126,25 @@ def find_stale_stocks(stocks_dir, symbols_file):
     
     Args:
         stocks_dir: stocks 디렉토리 경로
-        symbols_file: nasdaq_stocks_symbols.txt 파일 경로
+        symbols_file: nasdaq_stocks_symbols.txt 파일 경로 (None이면 필터링 없이 모든 파일 검사)
     
     Returns:
         list: 패턴이 있는 종목들의 정보 리스트
     """
-    # nasdaq_stocks_symbols.txt에서 티커 목록 읽기
-    with open(symbols_file, 'r') as f:
-        valid_tickers = set(line.strip() for line in f if line.strip())
-    
     stocks_path = Path(stocks_dir)
-    csv_files = list(stocks_path.glob('*.csv'))
+    csv_files = list(stocks_path.glob('*.txt'))
     
-    # 유효한 티커에 해당하는 CSV 파일만 필터링
-    filtered_files = [f for f in csv_files if f.stem in valid_tickers]
+    # symbols_file이 있는 경우에만 필터링
+    if symbols_file and os.path.exists(symbols_file):
+        # nasdaq_stocks_symbols.txt에서 티커 목록 읽기
+        with open(symbols_file, 'r') as f:
+            valid_tickers = set(line.strip() for line in f if line.strip())
+        
+        # 유효한 티커에 해당하는 CSV 파일만 필터링
+        filtered_files = [f for f in csv_files if f.stem in valid_tickers]
+    else:
+        # symbols_file이 없으면 모든 CSV 파일 검사
+        filtered_files = csv_files
     
     results = []
     
@@ -167,12 +172,16 @@ def find_stale_stocks(stocks_dir, symbols_file):
     return results
 
 if __name__ == '__main__':
-    stocks_dir = 'nasdaq_yfinance_20200401/stocks'
-    symbols_file = 'nasdaq_yfinance_20200401/nasdaq_stocks_symbols.txt'
-    
+    #stocks_dir = 'nasdaq_yfinance_20200401/stocks'
+    #symbols_file = 'nasdaq_yfinance_20200401/nasdaq_stocks_symbols.txt'
+    stocks_dir = 'nyse_nasdaq_nyse_20171011/Stocks'
+    symbols_file = None  # None이면 필터링 없이 모든 파일 검사
     print("Stale 패턴을 가진 종목을 찾는 중...")
     print("조건: Volume=0이고 Open/High/Low/Close가 전날과 동일한 행이 반복되는 경우")
-    print("필터: nasdaq_stocks_symbols.txt에 있는 티커만 검사, 1993-01-01 이후 데이터만 사용\n")
+    if symbols_file:
+        print("필터: nasdaq_stocks_symbols.txt에 있는 티커만 검사, 1993-01-01 이후 데이터만 사용\n")
+    else:
+        print("필터: 모든 CSV 파일 검사, 1993-01-01 이후 데이터만 사용\n")
     
     results = find_stale_stocks(stocks_dir, symbols_file)
     
