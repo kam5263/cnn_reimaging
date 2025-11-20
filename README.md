@@ -150,23 +150,97 @@ python create_longshort_csv.py
 CNN 모델을 구축하고 훈련합니다.
 
 **모델 아키텍처:**
+
+논문 기반의 2단계 Convolutional Neural Network 구조를 사용합니다.
+
 ```
-Input (32, 15, 1)
-  ↓
-Conv2D(64, (5,3)) + BatchNorm + LeakyReLU + MaxPool(2,1)
-  ↓
-Conv2D(128, (5,3)) + BatchNorm + LeakyReLU + MaxPool(2,1)
-  ↓
-Flatten + Dropout(0.5)
-  ↓
-Dense(2, softmax)  # Up/Down 확률
+입력 레이어
+  Input Shape: (32, 15, 1)
+  - 높이 32: 가격 영역(25.6px) + 거래량 영역(6.4px)
+  - 너비 15: 5일간의 데이터 (하루당 3픽셀)
+  - 채널 1: 흑백 이미지
+
+Block 1: 첫 번째 Convolution Block
+  Conv2D(filters=64, kernel_size=(5, 3), padding='same')
+    → 출력: (32, 15, 64)
+    → 파라미터 수: (5×3×1×64) + 64 = 1,024개
+    → 5×3 커널로 시간적(너비) 및 가격적(높이) 패턴 추출
+  
+  BatchNormalization()
+    → 출력: (32, 15, 64)
+    → 내부 공변량 이동(Internal Covariate Shift) 감소
+    → 훈련 안정성 향상
+  
+  LeakyReLU(alpha=0.01)
+    → 출력: (32, 15, 64)
+    → 음수 영역에서도 작은 기울기 유지 (Dying ReLU 문제 방지)
+  
+  MaxPooling2D(pool_size=(2, 1))
+    → 출력: (16, 15, 64)
+    → 높이만 절반으로 축소 (가격 차원 압축)
+    → 너비는 유지 (시간 정보 보존)
+
+Block 2: 두 번째 Convolution Block
+  Conv2D(filters=128, kernel_size=(5, 3), padding='same')
+    → 출력: (16, 15, 128)
+    → 파라미터 수: (5×3×64×128) + 128 = 122,880개
+    → 더 복잡한 고수준 패턴 추출
+  
+  BatchNormalization()
+    → 출력: (16, 15, 128)
+  
+  LeakyReLU(alpha=0.01)
+    → 출력: (16, 15, 128)
+  
+  MaxPooling2D(pool_size=(2, 1))
+    → 출력: (8, 15, 128)
+    → 최종 특징 맵 크기: 8 × 15 × 128 = 15,360차원
+
+Fully Connected Head
+  Flatten()
+    → 출력: (15,360,)
+    → 2D 특징 맵을 1D 벡터로 변환
+  
+  Dropout(rate=0.5)
+    → 출력: (15,360,)
+    → 훈련 시 50% 뉴런 무작위 비활성화
+    → 과적합(Overfitting) 방지
+  
+  Dense(units=2, activation='softmax')
+    → 출력: (2,)
+    → 파라미터 수: (15,360 × 2) + 2 = 30,722개
+    → 클래스별 확률 출력: [P(Down), P(Up)]
+    → P(Down) + P(Up) = 1.0 (확률 정규화)
 ```
 
+**레이어별 상세 정보:**
+
+| 레이어 | 출력 크기 | 파라미터 수 | 설명 |
+|--------|----------|------------|------|
+| Input | (32, 15, 1) | 0 | 5일간의 OHLCV 차트 이미지 |
+| Conv2D Block 1 | (32, 15, 64) | 1,024 | 저수준 패턴 (가격 변동, 캔들 형태) |
+| MaxPool 1 | (16, 15, 64) | 0 | 공간 차원 축소 |
+| Conv2D Block 2 | (16, 15, 128) | 122,880 | 고수준 패턴 (추세, 반전 신호) |
+| MaxPool 2 | (8, 15, 128) | 0 | 최종 특징 압축 |
+| Flatten | (15,360,) | 0 | 1D 벡터 변환 |
+| Dropout | (15,360,) | 0 | 정규화 (50% 드롭) |
+| Dense Output | (2,) | 30,722 | Up/Down 확률 |
+
+**총 파라미터 수:** 약 154,626개
+
 **훈련 설정:**
-- Optimizer: Adam (lr=1e-5)
+- Optimizer: Adam (learning_rate=1e-5)
 - Loss: Categorical Crossentropy
+- Metrics: Accuracy
 - Batch size: 128
-- Epochs: 50 (Early Stopping)
+- Epochs: 50 (Early Stopping 적용, patience=2)
+- Validation split: 0.3 (훈련 데이터의 30%를 검증용으로 사용)
+- 데이터 분할: 1993-2000 (훈련/검증), 2001- (테스트)
+
+**정규화 기법:**
+- Batch Normalization: 각 레이어의 입력 분포 정규화
+- Dropout: Fully Connected 레이어에서 과적합 방지
+- Early Stopping: 검증 손실이 개선되지 않으면 훈련 조기 종료
 
 ### `filter_nasdaq_stocks.py`
 
