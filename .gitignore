@@ -33,7 +33,8 @@ __pycache__/
 *.csv
 !nasdaq_yfinance_20200401/stocks_sample/*.csv
 !nasdaq_yfinance_20200401/stocks_processed/*.csv
-
+!longshort_2001_after.csv
+!stale_stocks_30days_plus.csv
 # IDE
 .vscode/
 .idea/
