@@ -36,6 +36,9 @@ __pycache__/
 !longshort_2001_after.csv
 !stale_stocks_30days_plus.csv
 !aapl_sample.csv
+!aapl_data.csv
+!longshort_nyse_2001_after.csv
+
 # IDE
 .vscode/
 .idea/
